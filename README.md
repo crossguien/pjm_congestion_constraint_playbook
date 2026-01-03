@@ -6,7 +6,6 @@ It produces:
 - Top locations by congestion intensity and tail risk
 - Top basis (location-to-location) pairs and when they blow out
 - Seasonality diagnostics (hour-of-day, day-of-week, month)
-- Exportable tables and figures you can reference in interviews
 
 ## Setup
 ```bash
