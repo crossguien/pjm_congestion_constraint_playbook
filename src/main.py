@@ -3,6 +3,11 @@ PJM Congestion & Constraint Playbook (Desk-Style)
 
 Run:
   python src/main.py --days 60 --market day_ahead --outdir outputs
+
+Modes:
+  --mode auto    # use PJM API if PJM_API_KEY is set, otherwise sample data
+  --mode online  # require PJM_API_KEY
+  --mode offline # always use sample data
 """
 
 from __future__ import annotations
@@ -35,6 +40,7 @@ class Config:
     outdir: str
     ref_location: str | None
     max_locations: int
+    mode: str
     seed: int = 7
 
 
@@ -103,7 +109,8 @@ def infer_columns(df: pd.DataFrame) -> dict:
 
 
 def download_lmp(cfg: Config, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
-    iso = PJM()
+    api_key = os.getenv("PJM_API_KEY")
+    iso = PJM(api_key=api_key) if api_key else PJM()
     market = cfg.market.lower().strip()
     if market not in {"day_ahead", "real_time"}:
         raise ValueError("market must be 'day_ahead' or 'real_time'")
@@ -133,6 +140,65 @@ def download_lmp(cfg: Config, start: pd.Timestamp, end: pd.Timestamp) -> pd.Data
     df = df[df["location"].isin(top_locs)].copy()
 
     return df
+
+
+def generate_sample_lmp(cfg: Config, start: pd.Timestamp, end: pd.Timestamp) -> pd.DataFrame:
+    rng = np.random.default_rng(cfg.seed)
+    end_exclusive = end - pd.Timedelta(hours=1)
+    times = pd.date_range(start, end_exclusive, freq="H")
+    if times.empty:
+        raise ValueError("Sample data needs at least 1 hour in the date range.")
+
+    locations = [
+        "PJM RTO",
+        "WEST",
+        "EAST",
+        "MIDATL",
+        "DOM",
+        "AECO",
+        "AEP",
+        "COMED",
+    ]
+    hours = times.hour.to_numpy()
+    dow = times.dayofweek.to_numpy()
+    month = times.month.to_numpy()
+
+    daily = 3.0 * np.sin(2 * np.pi * hours / 24)
+    weekly = 1.5 * np.cos(2 * np.pi * dow / 7)
+    seasonal = 0.5 * (month - month.mean()) / 12
+
+    rows = []
+    for loc in locations:
+        base_energy = 28 + rng.normal(0, 4)
+        loc_shift = rng.normal(0, 2)
+        congestion_scale = rng.uniform(0.8, 1.6)
+
+        energy = base_energy + 0.6 * daily + 0.3 * weekly + rng.normal(0, 1.2, size=times.size)
+        congestion = (
+            2.0
+            + loc_shift
+            + congestion_scale * daily
+            + 0.4 * weekly
+            + 3.5 * seasonal
+            + rng.normal(0, 2.0, size=times.size)
+        )
+        loss = 0.4 + rng.normal(0, 0.15, size=times.size)
+
+        spike_idx = rng.choice(times.size, size=max(3, times.size // 50), replace=False)
+        congestion[spike_idx] += rng.uniform(8, 25, size=spike_idx.size)
+
+        lmp = energy + congestion + loss
+
+        rows.append(pd.DataFrame({
+            "time": times,
+            "location": loc,
+            "lmp": lmp,
+            "congestion": congestion,
+            "loss": loss,
+            "energy": energy,
+        }))
+
+    return pd.concat(rows, ignore_index=True)
 
 
 def add_time_features(df: pd.DataFrame) -> pd.DataFrame:
@@ -281,9 +347,10 @@ def parse_args() -> Config:
     ap.add_argument("--outdir", type=str, default="outputs")
     ap.add_argument("--ref_location", type=str, default=None)
     ap.add_argument("--max_locations", type=int, default=35)
+    ap.add_argument("--mode", type=str, default="auto", choices=["auto", "online", "offline"])
     ap.add_argument("--seed", type=int, default=7)
     a = ap.parse_args()
-    return Config(days=a.days, market=a.market, outdir=a.outdir, ref_location=a.ref_location, max_locations=a.max_locations, seed=a.seed)
+    return Config(days=a.days, market=a.market, outdir=a.outdir, ref_location=a.ref_location, max_locations=a.max_locations, mode=a.mode, seed=a.seed)
 
 
 def main() -> None:
@@ -291,7 +358,23 @@ def main() -> None:
     paths = ensure_dirs(cfg.outdir)
 
     start, end = utc_date_range(cfg.days)
-    raw = download_lmp(cfg, start=start, end=end)
+    mode = cfg.mode.lower().strip()
+    api_key = os.getenv("PJM_API_KEY")
+    if mode == "online":
+        if not api_key:
+            raise SystemExit("PJM_API_KEY is required for --mode online. Set it and retry.")
+        raw = download_lmp(cfg, start=start, end=end)
+        data_source = "online (PJM API)"
+    elif mode == "offline":
+        raw = generate_sample_lmp(cfg, start=start, end=end)
+        data_source = "offline sample"
+    else:
+        if api_key:
+            raw = download_lmp(cfg, start=start, end=end)
+            data_source = "online (PJM API)"
+        else:
+            raw = generate_sample_lmp(cfg, start=start, end=end)
+            data_source = "offline sample"
     raw = add_time_features(raw)
     raw = congestion_metrics(raw)
 
@@ -306,6 +389,7 @@ def main() -> None:
     plot_outputs(paths, leaderboard, hm, hd)
     report_path = write_report(cfg, paths, leaderboard, pairs, ref)
 
+    print("Data source:", data_source)
     print("Saved raw parquet:", raw_path)
     print("Saved report:", report_path)
     print("Top locations (tail_score):")
