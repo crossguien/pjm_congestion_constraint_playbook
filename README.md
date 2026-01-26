@@ -1,11 +1,23 @@
 # PJM Congestion & Constraint Playbook (Desk-Style)
 
-This repo builds a repeatable congestion and basis-risk playbook using public PJM LMP data.
+Congestion risk in PJM is highly localized, non-linear, and seasonal. This playbook systematizes how desks identify where congestion concentrates, when it binds, and how basis relationships behave during stress periods using observable market outcomes.
+
+The goal is to convert raw LMP data into repeatable congestion and basis-risk insights.
 
 It produces:
 - Top locations by congestion intensity and tail risk
-- Top basis (location-to-location) pairs and when they blow out
-- Seasonality diagnostics (hour-of-day, day-of-week, month)
+
+  Identify nodes where congestion is both frequent and severe.
+
+- Basis pair rankings
+
+  Highlight location pairs that consistently blow out under stress.
+
+- Seasonality diagnostics
+
+  Reveal when congestion and basis risk are most likely to materialize by hour, day, and month.
+
+For example, recurring congestion during specific peak hours suggests structural constraints rather than transient noise.
 
 ## Setup
 ```bash
@@ -43,6 +55,44 @@ python src/main.py --days 60 --market real_time --outdir outputs
 python src/main.py --days 90 --ref_location "PJM RTO" --market day_ahead --outdir outputs
 python src/main.py --days 60 --max_locations 25 --outdir outputs
 ```
+
+## Trade intuition
+
+- Persistent congestion intensity indicates structural transmission limits.
+
+- Basis blowouts during specific hours point to constraint-driven risk.
+
+- Seasonal recurrence supports directional or option-like exposure rather than flat hedges.
+
+## Example desk workflow
+
+- Run the playbook to rank congestion-prone locations.
+
+- Identify basis pairs with asymmetric tail behavior.
+
+- Focus risk during historically active hours and seasons.
+
+- Use results to inform virtuals, FTR selection, or nodal exposure.
+
+## Assumptions and limitations
+
+- Focuses on observable congestion outcomes, not proprietary constraint forecasts.
+
+- Offline mode uses synthetic data for demonstration only.
+
+- Public endpoints may vary in constraint naming and availability.
+
+- Intended as a screening and risk-framing tool, not a standalone trading signal.
+
+## Production extensions
+
+- Integrate constraint-level metadata and outage information.
+
+- Automate rolling congestion regime detection.
+
+- Combine with DA vs RT spread models for unified risk views.
+
+- Scale to portfolio-level basis and congestion exposure tracking.
 
 ## Notes
 - "Constraints" can mean transmission constraint IDs; public endpoints vary.
